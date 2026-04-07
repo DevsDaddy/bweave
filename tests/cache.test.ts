@@ -1,4 +1,4 @@
-import {DictionaryCache, PresetDictionaries} from "../src/cache/dictionary";
+import {PresetDictionaries} from "../src/cache/dictionary";
 import {BWeave, BWeaveMode} from "../src";
 
 describe('Preset dictionaries improve compression', () => {

@@ -177,7 +177,8 @@ export class LZ77Weave implements IWeaveStrategy {
    */
   private getWindowSize(dataLength: number): number {
     if (dataLength < 1024) return 256;
-    if (dataLength < 65536) return 4096;
-    return 16384;
+    if (dataLength < 65536) return 1024;
+    if (dataLength < 655360) return 4096;
+    return 4096;
   }
 }
