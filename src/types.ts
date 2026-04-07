@@ -7,22 +7,22 @@
  * @git                 https://github.com/devsdaddy/bweave/
  */
 /* Import Required Modules */
-import {BWeaveMode} from "./compressor";
+import { BWeaveMode } from "./compressor";
 
 /**
  * Strategy interface
  */
 export interface IWeaveStrategy {
-    compress(data: Uint8Array): Uint8Array;
-    decompress(compressed: Uint8Array, originalLength: number): Uint8Array;
+  compress(data: Uint8Array): Uint8Array;
+  decompress(compressed: Uint8Array, originalLength: number): Uint8Array;
 }
 
 /**
  * Compression Header
  */
 export interface ICompressionHeader {
-    mode: BWeaveMode;
-    originalLen: number;
-    payload: Uint8Array;
-    checksumValid?: boolean;
+  mode: BWeaveMode;
+  originalLen: number;
+  payload: Uint8Array;
+  checksumValid?: boolean;
 }
