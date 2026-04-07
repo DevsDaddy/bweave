@@ -6,6 +6,7 @@
  * @build               1000
  * @git                 https://github.com/devsdaddy/bweave/
  */
+/* Import Modules */
 import { IWeaveStrategy } from '../types';
 
 /**
@@ -27,12 +28,14 @@ export class LZ77Weave implements IWeaveStrategy {
         const out: number[] = [];
         let pos = 0;
         const n = data.length;
+        const windowSize = this.getWindowSize(n);
 
         while (pos < n) {
             let bestDist = 0;
             let bestLen = 0;
-            const windowStart = Math.max(0, pos - this.WINDOW_SIZE);
+            const windowStart = Math.max(0, pos - windowSize);
 
+            // Поиск самого длинного совпадения (побайтово)
             for (let dist = 1; dist <= pos - windowStart; dist++) {
                 let len = 0;
                 while (
@@ -50,8 +53,8 @@ export class LZ77Weave implements IWeaveStrategy {
             }
 
             if (bestLen >= this.MIN_MATCH) {
-                const distMinus1 = bestDist - 1;      // 0..4095 (12 bit)
-                const lenMinus3 = bestLen - 3;        // 0..15 (4 bit)
+                const distMinus1 = bestDist - 1;
+                const lenMinus3 = bestLen - 3;
                 const high = (distMinus1 >> 4) & 0xFF;
                 const low = ((distMinus1 & 0x0F) << 4) | lenMinus3;
                 out.push(this.ESCAPE_BYTE, high, low);
@@ -83,7 +86,7 @@ export class LZ77Weave implements IWeaveStrategy {
         while (outPos < originalLength && i < compressed.length) {
             const first = compressed[i++];
             if (first === this.ESCAPE_BYTE) {
-                if (i >= compressed.length) throw new Error('LZ77: incomplete escape sequence');
+                if (i >= compressed.length) throw new Error('LZ77: incomplete escape');
                 const second = compressed[i];
                 if (second === this.ESCAPE_BYTE) {
                     out[outPos++] = this.ESCAPE_BYTE;
@@ -107,9 +110,13 @@ export class LZ77Weave implements IWeaveStrategy {
                 out[outPos++] = first;
             }
         }
-        if (outPos !== originalLength) {
-            throw new Error(`LZ77: expected ${originalLength} bytes, got ${outPos}`);
-        }
+        if (outPos !== originalLength) throw new Error(`LZ77: expected ${originalLength} bytes, got ${outPos}`);
         return out;
+    }
+
+    private getWindowSize(dataLength: number): number {
+        if (dataLength < 1024) return 256;
+        if (dataLength < 65536) return 4096;
+        return 16384;
     }
 }

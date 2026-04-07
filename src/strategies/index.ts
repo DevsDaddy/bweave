@@ -11,3 +11,5 @@ export * from "./rle";
 export * from "./lz77";
 export * from "./delta";
 export * from "./store";
+export * from "./dedup";
+export * from "./json";

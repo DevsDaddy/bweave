@@ -13,3 +13,4 @@ export * from "./types";
 export * from "./utils";
 export * from "./strategies";
 export * from "./compressor";
+export * from "./parallel";

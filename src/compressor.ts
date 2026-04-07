@@ -8,7 +8,7 @@
  */
 /* Import Required Modules */
 import {IWeaveStrategy} from "./types";
-import {DeltaWeave, LZ77Weave, RLEWeave, StoreWeave} from "./strategies";
+import {DedupWeave, DeltaWeave, JSONWeave, LZ77Weave, RLEWeave, StoreWeave} from "./strategies";
 import {BWeaveUtils} from "./utils";
 
 /**
@@ -18,7 +18,9 @@ export enum BWeaveMode {
     STORE = 0,
     LZ77 = 1,
     RLE = 2,
-    DELTA = 3
+    DELTA = 3,
+    JSON_WEAVE = 4,
+    DEDUP_WEAVE = 5,
 }
 
 /**
@@ -31,6 +33,16 @@ export interface BWeaveOptions {
     forcedMode?: BWeaveMode;
     /** Compression block size in bytes (0 = all input buffer) */
     blockSize?: number;
+    /* Use Parallel compression (if blocksize > 0) */
+    parallel?: boolean;
+    /* Cache last window for cross-pacakge compression */
+    dictCache?: boolean;
+    /* Adds checksum for headers */
+    checksum?: boolean;
+    /* schema for key mappings */
+    jsonSchema?: Record<string, number>;
+    /* Block size for DEDUP_WEAVE (by-defaults 64) */
+    dedupBlockSize?: number;
 }
 
 /**
@@ -38,24 +50,35 @@ export interface BWeaveOptions {
  */
 export class BWeave {
     /* Compressor Options */
-    private strategies: Map<BWeaveMode, IWeaveStrategy>;
+    private readonly strategies: Map<BWeaveMode, IWeaveStrategy>;
     private options: Required<BWeaveOptions>;
+    private lastWindow: Uint8Array | null = null;
 
     /**
      * Create new BWeave Compressor Instance
      * @param options {BWeaveOptions} BWeave Compressor Options
      */
     constructor(options: BWeaveOptions = {}) {
+        // Default Options
         this.options = {
             autoMode: options.autoMode ?? true,
             forcedMode: options.forcedMode ?? BWeaveMode.LZ77,
             blockSize: options.blockSize ?? 0,
+            parallel: options.parallel ?? false,
+            dictCache: options.dictCache ?? false,
+            checksum: options.checksum ?? false,
+            jsonSchema: options.jsonSchema ?? {},
+            dedupBlockSize: options.dedupBlockSize ?? 64,
         };
+
+        // Add Strategies Map
         this.strategies = new Map([
             [BWeaveMode.LZ77, new LZ77Weave()],
             [BWeaveMode.RLE, new RLEWeave()],
             [BWeaveMode.DELTA, new DeltaWeave()],
             [BWeaveMode.STORE, new StoreWeave()],
+            [BWeaveMode.JSON_WEAVE, new JSONWeave(this.options.jsonSchema)],
+            [BWeaveMode.DEDUP_WEAVE, new DedupWeave(this.options.dedupBlockSize)],
         ]);
     }
 
@@ -65,20 +88,28 @@ export class BWeave {
      * @returns {Uint8Array} Compressed buffer
      */
     public compress(data: Uint8Array): Uint8Array {
-        if (data.length === 0) {
-            return BWeaveUtils.writeHeader(BWeaveMode.STORE, 0, new Uint8Array(0));
+        if (data.length === 0) return BWeaveUtils.writeHeader(BWeaveMode.STORE, 0, new Uint8Array(0), this.options.checksum);
+        const mode = this.options.autoMode ? BWeaveUtils.detectBestMode(data, this.strategies) : this.options.forcedMode;
+        let strategy = this.strategies.get(mode)!;
+
+        if (this.options.dictCache && this.lastWindow && mode === BWeaveMode.LZ77) {
+            const combined = new Uint8Array(this.lastWindow.length + data.length);
+            combined.set(this.lastWindow);
+            combined.set(data, this.lastWindow.length);
+            const compressedCombined = strategy.compress(combined);
+            this.lastWindow = data.slice(-4096);
+            return BWeaveUtils.writeHeader(mode, data.length, compressedCombined, this.options.checksum);
         }
 
-        const mode = this.options.autoMode ? BWeaveUtils.detectBestMode(data) : this.options.forcedMode;
-        const strategy = this.strategies.get(mode)!;
         const compressed = strategy.compress(data);
-
         if (compressed.length >= data.length && mode !== BWeaveMode.STORE) {
             const storeStrategy = this.strategies.get(BWeaveMode.STORE)!;
             const storeCompressed = storeStrategy.compress(data);
-            return BWeaveUtils.writeHeader(BWeaveMode.STORE, data.length, storeCompressed);
+            this.lastWindow = this.options.dictCache ? data.slice(-4096) : null;
+            return BWeaveUtils.writeHeader(BWeaveMode.STORE, data.length, storeCompressed, this.options.checksum);
         }
-        return BWeaveUtils.writeHeader(mode, data.length, compressed);
+        this.lastWindow = this.options.dictCache ? data.slice(-4096) : null;
+        return BWeaveUtils.writeHeader(mode, data.length, compressed, this.options.checksum);
     }
 
     /**

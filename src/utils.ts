@@ -8,7 +8,7 @@
  */
 /* Import Mode */
 import { BWeaveMode } from './compressor';
-import {ICompressionHeader} from "./types";
+import {ICompressionHeader, IWeaveStrategy} from "./types";
 
 /**
  * BWeave Compressor utils
@@ -16,39 +16,56 @@ import {ICompressionHeader} from "./types";
 export class BWeaveUtils {
     // Protected Constants
     private static HEXChars : string = '0123456789abcdef';
+    private static CHECKSUM_FLAG = 0x80;
+    private static crc32Table = (() => {
+        const table = new Uint32Array(256);
+        for (let i = 0; i < 256; i++) {
+            let c = i;
+            for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+            table[i] = c >>> 0;
+        }
+        return table;
+    })();
 
     /**
      * Detect best BWeave Compression Mode
      * @param data {Uint8Array} Data buffer
+     * @param strategies {Map<BWeaveMode, IWeaveStrategy>} Strategies map
      * @returns {BWeaveMode} Compression mode
      */
-    public static detectBestMode(data: Uint8Array): BWeaveMode {
-        const len = Math.min(data.length, 256);
-        if (len === 0) return BWeaveMode.STORE;
-
-        let repeats = 0;
-        let monotonicSteps = 0;
-        const freq = new Array(256).fill(0);
-
-        for (let i = 0; i < len; i++) {
-            const byte = data[i];
-            freq[byte]++;
-            if (i > 0 && data[i] === data[i - 1]) repeats++;
-            if (i > 1 && (data[i] - data[i - 1]) === (data[i - 1] - data[i - 2])) monotonicSteps++;
-        }
-
-        let entropy = 0;
-        for (let i = 0; i < 256; i++) {
-            if (freq[i] > 0) {
-                const p = freq[i] / len;
-                entropy -= p * Math.log2(p);
+    public static detectBestMode(data: Uint8Array, strategies: Map<BWeaveMode, IWeaveStrategy>): BWeaveMode {
+        const sample = data.length > 1024 ? data.subarray(0, 1024) : data;
+        const candidates = [BWeaveMode.LZ77, BWeaveMode.RLE, BWeaveMode.DELTA, BWeaveMode.JSON_WEAVE, BWeaveMode.DEDUP_WEAVE];
+        let bestMode = BWeaveMode.STORE;
+        let bestSize = sample.length;
+        for (const mode of candidates) {
+            const strategy = strategies.get(mode);
+            if (strategy) {
+                try {
+                    const compressed = strategy.compress(sample);
+                    if (compressed.length < bestSize) {
+                        bestSize = compressed.length;
+                        bestMode = mode;
+                    }
+                } catch {
+                    // ignore errors (e.g., JSON parsing)
+                }
             }
         }
+        return bestMode;
+    }
 
-        if (repeats > len * 0.6) return BWeaveMode.RLE;
-        if (monotonicSteps > len * 0.4) return BWeaveMode.DELTA;
-        if (entropy < 5.5) return BWeaveMode.LZ77;
-        return BWeaveMode.STORE;
+    /**
+     * CRC32 Function
+     * @param data {Uint8Array} Buffer
+     * @returns {number} CRC32
+     */
+    public static crc32(data: Uint8Array): number {
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < data.length; i++) {
+            crc = (crc >>> 8) ^ BWeaveUtils.crc32Table[(crc ^ data[i]) & 0xFF];
+        }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
     }
 
     /**
@@ -56,16 +73,26 @@ export class BWeaveUtils {
      * @param mode {BWeaveMode} Compression Mode
      * @param originalLen {number} Original Length
      * @param payload {Uint8Array} Payload buffer
+     * @param checksum {boolean} Checksum header
      * @returns {Uint8Array} Packet buffer with compression header
      */
-    public static writeHeader(mode: BWeaveMode, originalLen: number, payload: Uint8Array): Uint8Array{
+    public static writeHeader(mode: BWeaveMode, originalLen: number, payload: Uint8Array, checksum : boolean = false): Uint8Array {
         if (originalLen >= 0xFFFFFF) throw new Error('Data too large (max 16MB per block)');
-        const header = new Uint8Array(4 + payload.length);
-        header[0] = mode;
+        const actualMode = checksum ? (mode | BWeaveUtils.CHECKSUM_FLAG) : mode;
+        const headerLen = checksum ? 8 : 4;
+        const header = new Uint8Array(headerLen + payload.length);
+        header[0] = actualMode;
         header[1] = (originalLen >> 16) & 0xFF;
         header[2] = (originalLen >> 8) & 0xFF;
         header[3] = originalLen & 0xFF;
-        header.set(payload, 4);
+        if (checksum) {
+            const sum = BWeaveUtils.crc32(payload);
+            header[4] = (sum >> 24) & 0xFF;
+            header[5] = (sum >> 16) & 0xFF;
+            header[6] = (sum >> 8) & 0xFF;
+            header[7] = sum & 0xFF;
+        }
+        header.set(payload, headerLen);
         return header;
     }
 
@@ -76,10 +103,26 @@ export class BWeaveUtils {
      */
     public static readHeader(data: Uint8Array): ICompressionHeader {
         if (data.length < 4) throw new Error('Invalid header');
-        const mode = data[0] as BWeaveMode;
+        const modeByte = data[0];
+        const hasChecksum = (modeByte & BWeaveUtils.CHECKSUM_FLAG) !== 0;
+        const mode = (modeByte & ~BWeaveUtils.CHECKSUM_FLAG) as BWeaveMode;
         const originalLen = (data[1] << 16) | (data[2] << 8) | data[3];
-        const payload = data.subarray(4);
-        return { mode, originalLen, payload };
+
+        let payloadStart = 4;
+        let checksumValid = true;
+        if (hasChecksum) {
+            if (data.length < 8) throw new Error('Invalid header: checksum missing');
+            const storedCrc = (data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7];
+            payloadStart = 8;
+            const payload = data.subarray(payloadStart);
+            const computedCrc = BWeaveUtils.crc32(payload);
+            checksumValid = storedCrc === computedCrc;
+            if (!checksumValid) {
+                console.warn('BWeave: checksum mismatch, data may be corrupted');
+            }
+        }
+        const payload = data.subarray(payloadStart);
+        return { mode, originalLen, payload, checksumValid };
     }
 
     /**
@@ -185,8 +228,6 @@ export class BWeaveUtils {
      * @returns {string} raw string
      */
     public static bytesToText(bytes : number[] | Uint8Array) : string {
-        return new TextDecoder().decode(bytes as Uint8Array);
-
         let result = [],
             i = 0
 

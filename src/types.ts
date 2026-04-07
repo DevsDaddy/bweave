@@ -24,4 +24,5 @@ export interface ICompressionHeader {
     mode: BWeaveMode;
     originalLen: number;
     payload: Uint8Array;
+    checksumValid?: boolean;
 }
