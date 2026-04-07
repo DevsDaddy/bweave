@@ -1,0 +1,57 @@
+{
+  "name": "bweave",
+  "version": "1.0.0",
+  "description": "BWeave - a full-featured, pure TypeScript powerful hybrid and cross-platform (browser & NodeJS) compression algorithm for real-time applications.",
+  "keywords": [
+    "bweave",
+    "binary",
+    "weave",
+    "typescript",
+    "compression",
+    "lightweight",
+    "realtime",
+    "apps",
+    "node",
+    "client",
+    "browser",
+    "pure",
+    "algorithm",
+    "library"
+  ],
+  "homepage": "https://github.com/DevsDaddy/bweave#readme",
+  "bugs": {
+    "url": "https://github.com/DevsDaddy/bweave/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DevsDaddy/bweave.git"
+  },
+  "license": "MIT",
+  "author": "Elijah Rastorguev",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "test": "jest",
+    "bench": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' benchmarks/run.ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "tsup": "^6.7.0",
+    "ts-node": "^10.9.0",
+    "prettier": "^2.8.0",
+    "typescript": "^5.0.0"
+  }
+}
