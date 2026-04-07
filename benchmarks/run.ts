@@ -11,7 +11,8 @@ import {
     generateTextData,
     generateRepetitiveData,
     generateMonotonicData,
-    generateRandomData, generateJSONData,
+    generateRandomData, generateJSONData, generateHTTPData, generateHTMLData,
+    generateJSData, generateProtobufData,
 } from './data/generators';
 
 // Data sizes
@@ -25,6 +26,11 @@ type WinnerCategories = {
     bestOverall: BenchmarkResult;
 };
 
+/**
+ * Find Benchmark Winners
+ * @param results {BenchmarkResult[]} Benchmark Results
+ * @returns {WinnerCategories} Winner Categories
+ */
 function findWinners(results: BenchmarkResult[]): WinnerCategories {
     let bestSpeed = results[0];
     let bestRatio = results[0];
@@ -40,8 +46,14 @@ function findWinners(results: BenchmarkResult[]): WinnerCategories {
     return { bestSpeed, bestRatio, bestOverall };
 }
 
+/**
+ * Format Winner Marker
+ * @param winner {BenchmarkResult} Winner
+ * @param current {BenchmarkResult} Current
+ * @returns {string} Formatted Value
+ */
 function formatWinnerMarker(winner: BenchmarkResult, current: BenchmarkResult): string {
-    return winner === current ? '🏆' : '';
+    return winner === current ? 'win' : '';
 }
 
 /**
@@ -50,26 +62,33 @@ function formatWinnerMarker(winner: BenchmarkResult, current: BenchmarkResult): 
 async function run() {
     const benchmark = new BWeaveBenchmark();
 
-    console.log('🚀 BWeave Enhanced Benchmark Suite\n');
+    console.log('BWeave Benchmark Suite\n');
     console.log(`Iterations per test: ${ITERATIONS}\n`);
 
     for (const size of SIZES) {
-        console.log(`\n${'='.repeat(100)}`);
+        console.log(`\n${'='.repeat(120)}`);
         console.log(`📦 Data size: ${size} bytes (${(size / 1024).toFixed(1)} KB)`);
-        console.log(`${'='.repeat(100)}`);
+        console.log(`${'='.repeat(120)}`);
 
         const datasets = [
-            { name: '📝 Text (JSON)', data: generateTextData(size) },
-            { name: '🔄 Repetitive (pattern)', data: generateRepetitiveData(size) },
-            { name: '📈 Monotonic (delta)', data: generateMonotonicData(size) },
-            { name: '🎲 Random', data: generateRandomData(size) }
+            { name: '📝 Text (JSON)', data: generateTextData(size), dict: 'json' as const },
+            { name: '🔄 Repetitive (pattern)', data: generateRepetitiveData(size), dict: 'binary' as const },
+            { name: '📈 Monotonic (delta)', data: generateMonotonicData(size), dict: 'binary' as const },
+            { name: '🎲 Random data', data: generateRandomData(size), dict: null },
+            { name: '🌐 HTTP request', data: generateHTTPData(size), dict: 'http' as const },
+            { name: '📄 HTML fragment', data: generateHTMLData(size), dict: 'html' as const },
+            { name: '📄 JavaScript code', data: generateJSData(size), dict: 'js' as const },
+            { name: '📡 Protobuf-like', data: generateProtobufData(size), dict: 'protobuf' as const },
         ];
 
-        for (const { name, data } of datasets) {
+        for (const { name, data, dict } of datasets) {
             console.log(`\n▶ ${name}`);
             const results = await benchmark.runAll(data, ITERATIONS);
+            if (dict) {
+                const dictResult = await benchmark.runWithDict(data, dict, ITERATIONS);
+                results.push(dictResult);
+            }
             const winners = findWinners(results);
-
             const tableRows = results.map(r => ({
                 'Library/Mode': `${r.library}${r.mode ? ` (${r.mode})` : ''}`,
                 'Ratio': r.ratio.toFixed(2),
@@ -80,9 +99,8 @@ async function run() {
                 '🏆 Ratio': formatWinnerMarker(winners.bestRatio, r),
                 '🏆 Overall': formatWinnerMarker(winners.bestOverall, r),
             }));
-
             console.table(tableRows);
-            console.log(`\n✨ Winners: Speed: ${winners.bestSpeed.library}${winners.bestSpeed.mode ? ` (${winners.bestSpeed.mode})` : ''} | Ratio: ${winners.bestRatio.library}${winners.bestRatio.mode ? ` (${winners.bestRatio.mode})` : ''} | Overall: ${winners.bestOverall.library}${winners.bestOverall.mode ? ` (${winners.bestOverall.mode})` : ''}`);
+            console.log(`Winners: Speed: ${winners.bestSpeed.library}${winners.bestSpeed.mode ? ` (${winners.bestSpeed.mode})` : ''} | Ratio: ${winners.bestRatio.library}${winners.bestRatio.mode ? ` (${winners.bestRatio.mode})` : ''} | Overall: ${winners.bestOverall.library}${winners.bestOverall.mode ? ` (${winners.bestOverall.mode})` : ''}`);
         }
     }
 }

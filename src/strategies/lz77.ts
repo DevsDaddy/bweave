@@ -8,16 +8,28 @@
  */
 /* Import Modules */
 import { IWeaveStrategy } from '../types';
+import {DictionaryCache} from "../cache/dictionary";
 
 /**
  * LZ77 Strategy for BWeave Compressor
  */
 export class LZ77Weave implements IWeaveStrategy {
     /* Strategy constants */
-    private readonly WINDOW_SIZE = 4096;
     private readonly MAX_MATCH = 18;
     private readonly MIN_MATCH = 3;
     private readonly ESCAPE_BYTE = 0xFE;
+    private readonly DICT_MARKER = 0xFD;
+    private readonly dictionaryCache?: DictionaryCache;
+    private readonly dictionary?: Uint8Array;
+
+    /**
+     * Create LZ77 Strategy
+     * @param dictionaryCache {DictionaryCache} Dictionary Cache
+     */
+    constructor(dictionaryCache?: DictionaryCache) {
+        this.dictionaryCache = dictionaryCache;
+        this.dictionary = dictionaryCache ? dictionaryCache.dict : undefined;
+    }
 
     /**
      * Compress
@@ -33,31 +45,51 @@ export class LZ77Weave implements IWeaveStrategy {
         while (pos < n) {
             let bestDist = 0;
             let bestLen = 0;
-            const windowStart = Math.max(0, pos - windowSize);
+            let isDictMatch = false;
 
-            // Поиск самого длинного совпадения (побайтово)
-            for (let dist = 1; dist <= pos - windowStart; dist++) {
-                let len = 0;
-                while (
-                    len < this.MAX_MATCH &&
-                    pos + len < n &&
-                    data[pos + len] === data[pos - dist + len]
-                    ) {
-                    len++;
+            if (this.dictionaryCache) {
+                const dictMatch = this.dictionaryCache.findMatch(data, pos);
+                if (dictMatch && dictMatch.length > bestLen) {
+                    bestLen = dictMatch.length;
+                    bestDist = dictMatch.offset;
+                    isDictMatch = true;
                 }
-                if (len >= this.MIN_MATCH && len > bestLen) {
-                    bestLen = len;
-                    bestDist = dist;
-                    if (bestLen === this.MAX_MATCH) break;
+            }
+
+            if (!isDictMatch || bestLen < this.MAX_MATCH) {
+                const windowStart = Math.max(0, pos - windowSize);
+                for (let dist = 1; dist <= pos - windowStart; dist++) {
+                    let len = 0;
+                    while (
+                        len < this.MAX_MATCH &&
+                        pos + len < n &&
+                        data[pos + len] === data[pos - dist + len]
+                        ) {
+                        len++;
+                    }
+                    if (len >= this.MIN_MATCH && len > bestLen) {
+                        bestLen = len;
+                        bestDist = dist;
+                        isDictMatch = false;
+                        if (bestLen === this.MAX_MATCH) break;
+                    }
                 }
             }
 
             if (bestLen >= this.MIN_MATCH) {
-                const distMinus1 = bestDist - 1;
                 const lenMinus3 = bestLen - 3;
-                const high = (distMinus1 >> 4) & 0xFF;
-                const low = ((distMinus1 & 0x0F) << 4) | lenMinus3;
-                out.push(this.ESCAPE_BYTE, high, low);
+                if (isDictMatch) {
+                    out.push(this.ESCAPE_BYTE, this.DICT_MARKER);
+                    const distMinus1 = bestDist;
+                    const high = (distMinus1 >> 4) & 0xFF;
+                    const low = ((distMinus1 & 0x0F) << 4) | lenMinus3;
+                    out.push(high, low);
+                } else {
+                    const distMinus1 = bestDist - 1;
+                    const high = (distMinus1 >> 4) & 0xFF;
+                    const low = ((distMinus1 & 0x0F) << 4) | lenMinus3;
+                    out.push(this.ESCAPE_BYTE, high, low);
+                }
                 pos += bestLen;
             } else {
                 const byte = data[pos];
@@ -91,8 +123,23 @@ export class LZ77Weave implements IWeaveStrategy {
                 if (second === this.ESCAPE_BYTE) {
                     out[outPos++] = this.ESCAPE_BYTE;
                     i++;
+                } else if (second === this.DICT_MARKER) {
+                    if (!this.dictionary) throw new Error('LZ77: dictionary required but missing');
+                    if (i + 2 >= compressed.length) throw new Error('LZ77: incomplete dict reference');
+                    i++;
+                    const high = compressed[i++];
+                    const low = compressed[i++];
+                    const dictOffset = ((high << 4) | (low >> 4)) & 0x0FFF;
+                    const lenMinus3 = low & 0x0F;
+                    const length = lenMinus3 + 3;
+                    for (let j = 0; j < length; j++) {
+                        if (dictOffset + j >= this.dictionary.length) {
+                            throw new Error('LZ77: dictionary index out of range');
+                        }
+                        out[outPos++] = this.dictionary[dictOffset + j];
+                    }
                 } else {
-                    if (i + 1 >= compressed.length) throw new Error('LZ77: incomplete reference');
+                    if (i + 1 >= compressed.length) throw new Error('LZ77: incomplete window reference');
                     const high = second;
                     const low = compressed[i + 1];
                     i += 2;
@@ -114,6 +161,12 @@ export class LZ77Weave implements IWeaveStrategy {
         return out;
     }
 
+    /**
+     * Get Window Size
+     * @param dataLength {number} Data length
+     * @returns {number} Window size
+     * @private
+     */
     private getWindowSize(dataLength: number): number {
         if (dataLength < 1024) return 256;
         if (dataLength < 65536) return 4096;

@@ -9,20 +9,23 @@
 /* Import Modules */
 import {LZ77Weave} from "./lz77";
 import {IWeaveStrategy} from "../types";
+import {BWeaveUtils} from "../utils";
 
 /**
  * JSON Strategy for BWeave Compressor
  */
 export class JSONWeave implements IWeaveStrategy {
-    private lz77 = new LZ77Weave();
+    private lz77 : LZ77Weave;
     private schema: Map<string, number>;
     private reverseSchema: Map<number, string>;
 
     /**
      * JSON Data Strategy for BWeave Compressor
      * @param schema {Record<string,number>} Schema for compression
+     * @param lz77 {LZ77Weave} LZ77 Instance
      */
-    constructor(schema?: Record<string, number>) {
+    constructor(schema?: Record<string, number>, lz77 ? : LZ77Weave) {
+        this.lz77 = lz77 || new LZ77Weave();
         this.schema = new Map();
         this.reverseSchema = new Map();
         if (schema) {
@@ -48,7 +51,7 @@ export class JSONWeave implements IWeaveStrategy {
         }
 
         const tokenized = this.tokenize(obj);
-        const tokenizedBytes = new TextEncoder().encode(JSON.stringify(tokenized));
+        const tokenizedBytes = BWeaveUtils.textToBytes(JSON.stringify(tokenized));
         const compressed = this.lz77.compress(tokenizedBytes);
         const schemaBytes = this.serializeSchema(tokenizedBytes.length);
         const result = new Uint8Array(schemaBytes.length + compressed.length);
@@ -92,7 +95,7 @@ export class JSONWeave implements IWeaveStrategy {
             const tokenizedStr = new TextDecoder().decode(decompressedTokenized);
             const tokenizedObj = JSON.parse(tokenizedStr);
             const originalObj = this.detokenize(tokenizedObj);
-            return new TextEncoder().encode(JSON.stringify(originalObj));
+            return BWeaveUtils.textToBytes(JSON.stringify(originalObj));
         } catch {
             return this.lz77.decompress(compressed, originalLength);
         }
@@ -153,17 +156,14 @@ export class JSONWeave implements IWeaveStrategy {
             schemaObj[key] = token;
         }
         const schemaJson = JSON.stringify(schemaObj);
-        const schemaBytes = new TextEncoder().encode(schemaJson);
+        const schemaBytes = BWeaveUtils.textToBytes(schemaJson);
         const result = new Uint8Array(2 + 4 + schemaBytes.length);
-        // Длина схемы (2 байта)
         result[0] = (schemaBytes.length >> 8) & 0xFF;
         result[1] = schemaBytes.length & 0xFF;
-        // Длина токенизированных данных (4 байта)
         result[2] = (tokenizedLength >> 24) & 0xFF;
         result[3] = (tokenizedLength >> 16) & 0xFF;
         result[4] = (tokenizedLength >> 8) & 0xFF;
         result[5] = tokenizedLength & 0xFF;
-        // Сама схема
         result.set(schemaBytes, 6);
         return result;
     }

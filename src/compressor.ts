@@ -10,6 +10,7 @@
 import {IWeaveStrategy} from "./types";
 import {DedupWeave, DeltaWeave, JSONWeave, LZ77Weave, RLEWeave, StoreWeave} from "./strategies";
 import {BWeaveUtils} from "./utils";
+import {DictionaryCache} from "./cache/dictionary";
 
 /**
  * Compressor Mode
@@ -27,11 +28,11 @@ export enum BWeaveMode {
  * Compressor Options
  */
 export interface BWeaveOptions {
-    /** Automatically choose compression mode (by-defaults true) */
+    /* Automatically choose compression mode (by-defaults true) */
     autoMode?: boolean;
-    /** Force Mode (autoMode = false) */
+    /* Force Mode (autoMode = false) */
     forcedMode?: BWeaveMode;
-    /** Compression block size in bytes (0 = all input buffer) */
+    /* Compression block size in bytes (0 = all input buffer) */
     blockSize?: number;
     /* Use Parallel compression (if blocksize > 0) */
     parallel?: boolean;
@@ -43,6 +44,8 @@ export interface BWeaveOptions {
     jsonSchema?: Record<string, number>;
     /* Block size for DEDUP_WEAVE (by-defaults 64) */
     dedupBlockSize?: number;
+    /* Dictionary Cache */
+    sharedDict?: Uint8Array | undefined;
 }
 
 /**
@@ -69,16 +72,27 @@ export class BWeave {
             checksum: options.checksum ?? false,
             jsonSchema: options.jsonSchema ?? {},
             dedupBlockSize: options.dedupBlockSize ?? 64,
+            sharedDict: options.sharedDict as Uint8Array ?? undefined
         };
 
+        let dictCache: DictionaryCache | undefined;
+        if (options.sharedDict) dictCache = new DictionaryCache(options.sharedDict);
+
         // Add Strategies Map
+        const lz77 = new LZ77Weave(dictCache);
+        const rle = new RLEWeave();
+        const delta = new DeltaWeave();
+        const store = new StoreWeave();
+        const jsonWeave = new JSONWeave(options.jsonSchema, lz77);
+        const dedup = new DedupWeave(options.dedupBlockSize);
+
         this.strategies = new Map([
-            [BWeaveMode.LZ77, new LZ77Weave()],
-            [BWeaveMode.RLE, new RLEWeave()],
-            [BWeaveMode.DELTA, new DeltaWeave()],
-            [BWeaveMode.STORE, new StoreWeave()],
-            [BWeaveMode.JSON_WEAVE, new JSONWeave(this.options.jsonSchema)],
-            [BWeaveMode.DEDUP_WEAVE, new DedupWeave(this.options.dedupBlockSize)],
+            [BWeaveMode.LZ77, lz77],
+            [BWeaveMode.RLE, rle],
+            [BWeaveMode.DELTA, delta],
+            [BWeaveMode.STORE, store],
+            [BWeaveMode.JSON_WEAVE, jsonWeave],
+            [BWeaveMode.DEDUP_WEAVE, dedup],
         ]);
     }
 

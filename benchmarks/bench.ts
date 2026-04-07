@@ -11,6 +11,7 @@ import { performance } from 'perf_hooks';
 import {BWeave, BWeaveCompressorParallel, BWeaveMode} from '../src';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
+import {PresetDictionaries} from "../src/cache/dictionary";
 
 /* For Testing */
 const deflate = promisify(zlib.deflate);
@@ -41,21 +42,32 @@ export class BWeaveBenchmark {
     private bweaveJSON = new BWeave({ autoMode: false, forcedMode: BWeaveMode.JSON_WEAVE, jsonSchema: { id: 1, name: 2, value: 3, tags: 4, active: 5 } });
     private bweaveDedup = new BWeave({ autoMode: false, forcedMode: BWeaveMode.DEDUP_WEAVE, dedupBlockSize: 64 });
     private bweaveParallel = new BWeaveCompressorParallel({ autoMode: true });
-    private bweaveChecksum = new BWeave({ autoMode: true, checksum: true });
-    private bweaveDictCache = new BWeave({ autoMode: false, forcedMode: BWeaveMode.LZ77, dictCache: true });
+
+    /* Dictionary Compressors */
+    private dictCompressors = {
+        json: new BWeave({ autoMode: false, forcedMode: BWeaveMode.LZ77, sharedDict: PresetDictionaries.json }),
+        http: new BWeave({ autoMode: false, forcedMode: BWeaveMode.LZ77, sharedDict: PresetDictionaries.http }),
+        html: new BWeave({ autoMode: false, forcedMode: BWeaveMode.LZ77, sharedDict: PresetDictionaries.html }),
+        js: new BWeave({ autoMode: false, forcedMode: BWeaveMode.LZ77, sharedDict: PresetDictionaries.js }),
+        binary: new BWeave({ autoMode: false, forcedMode: BWeaveMode.LZ77, sharedDict: PresetDictionaries.binary }),
+        protobuf: new BWeave({ autoMode: false, forcedMode: BWeaveMode.LZ77, sharedDict: PresetDictionaries.protobuf }),
+    };
 
     /**
      * Run All Benchmarks
      * @param data {Uint8Array} Data for benchmark
      * @param iterations {number} Number of iterations
+     * @returns {Promise<BenchmarkResult[]>} Benchmark results
      */
     async runAll(data: Uint8Array, iterations: number = 10): Promise<BenchmarkResult[]> {
         const results: BenchmarkResult[] = [];
 
+        // Basic Modes
         results.push(await this.benchmarkBWeave(this.bweaveAuto, data, 'Auto', iterations));
         results.push(await this.benchmarkBWeave(this.bweaveLZ77, data, 'LZ77', iterations));
         results.push(await this.benchmarkBWeave(this.bweaveRLE, data, 'RLE', iterations));
         results.push(await this.benchmarkBWeave(this.bweaveDelta, data, 'Delta', iterations));
+        results.push(await this.benchmarkBWeave(this.bweaveJSON, data, 'JSON_WEAVE', iterations));
         results.push(await this.benchmarkBWeave(this.bweaveDedup, data, 'DEDUP_WEAVE', iterations));
         results.push(await this.benchmarkParallel(data, iterations));
         results.push(await this.benchmarkZlib(data, iterations));
@@ -63,6 +75,26 @@ export class BWeaveBenchmark {
         return results;
     }
 
+    /**
+     * Run with Dictionary
+     * @param data {Uint8Array} Data buffer
+     * @param dictName Dictionary name
+     * @param iterations {number} Number of iterations
+     * @returns {Promise<BenchmarkResult>} Benchmark Result
+     */
+    async runWithDict(data: Uint8Array, dictName: keyof typeof this.dictCompressors, iterations: number = 5): Promise<BenchmarkResult> {
+        const compressor = this.dictCompressors[dictName];
+        return this.benchmarkBWeave(compressor, data, `LZ77 + dict(${dictName})`, iterations);
+    }
+
+    /**
+     * Benchmark BWeave Compressor
+     * @param compressor {BWeave} Compressor Instance
+     * @param data {Uint8Array} Data buffer
+     * @param label {string} Label
+     * @param iterations {number} Number of iterations
+     * @private
+     */
     private async benchmarkBWeave(
         compressor: BWeave,
         data: Uint8Array,
