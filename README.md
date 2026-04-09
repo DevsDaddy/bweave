@@ -5,6 +5,8 @@
 
 > The key idea is to automatically select the most appropriate compression algorithm for each data fragment, ensuring minimal latency with an acceptable compression ratio.
 
+![BWEAVE NPM](https://badge.fury.io/js/bweave.svg) ![BWEAVE Compression - MIT opensource](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 ---
 
 [About](#about-bweave) | [Get Started](#get-started) | [Internal Structure](#internal-structure) | [Benchmarks and Tests](#benchmarks-and-tests) | [Contact Me](mailto:ilya@neurosell.top)
